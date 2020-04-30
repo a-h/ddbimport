@@ -54,12 +54,10 @@ func main() {
 	for {
 		batchCount++
 		batch, read, err := reader.ReadBatch()
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
+		if err != nil && err != io.EOF {
 			log.Fatalf("failed to read batch %d: %v", batchCount, err)
 		}
+		end := err == io.EOF
 		totalCount += read
 		err = BatchPut(client, *tableFlag, batch[:read])
 		if err != nil {
@@ -69,6 +67,9 @@ func main() {
 		if batchCount%100 == 0 {
 			duration = time.Since(start)
 			log.Printf("inserted %d batches (%d records) in %v - %d records per second", batchCount, totalCount, duration, int(float64(totalCount)/duration.Seconds()))
+		}
+		if end {
+			break
 		}
 	}
 	duration = time.Since(start)

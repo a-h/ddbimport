@@ -1,4 +1,4 @@
-.PHONY: 01-nodeimport 02-goimport
+.PHONY: 01-nodeimport 02-goimport 03-goimport-gr
 
 create-table:
 	aws dynamodb create-table \
@@ -32,3 +32,7 @@ prepare-data:
 
 02-goimport:
 	go run 02-goimport/main.go -region=eu-west-2 -table=ddbimport -csv=data.csv -delimiter=tab
+
+03-goimport-gr:
+	go run 03-goimport-gr/main.go -region=eu-west-2 -table=ddbimport -csv=data.csv -delimiter=tab -concurrency=16
+
