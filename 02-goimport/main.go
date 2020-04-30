@@ -50,11 +50,10 @@ func main() {
 		log.Fatalf("failed to create CSV reader: %v", err)
 	}
 
-	var batchCount, totalCount, read int
-	batch := make([]map[string]*dynamodb.AttributeValue, 25)
+	var batchCount, totalCount int
 	for {
 		batchCount++
-		batch, read, err = reader.ReadBatch(batch)
+		batch, read, err := reader.ReadBatch()
 		if err != nil {
 			if err == io.EOF {
 				break
@@ -62,7 +61,7 @@ func main() {
 			log.Fatalf("failed to read batch %d: %v", batchCount, err)
 		}
 		totalCount += read
-		err := BatchPut(client, *tableFlag, batch[:read])
+		err = BatchPut(client, *tableFlag, batch[:read])
 		if err != nil {
 			log.Fatalf("error executing batch put: %v", err)
 			return

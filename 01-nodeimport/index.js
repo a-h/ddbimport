@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import "path";
+import https from "https";
 import yargs from "yargs";
 import fastCsv from "fast-csv";
 import * as path from "path";
@@ -52,17 +53,34 @@ const batchWrite = async ({ client, table, items }) => {
   await client.batchWriteItem(params).promise();
 };
 
-const dynamoImport = async ({ region, table, csv, delimiter }) => {
+const since = (secs) => {
+  const [ nowS, nowNS ] = process.hrtime();
+  const now = nowS + (nowNS/1000000000);
+  return now - secs;
+}
+
+const dynamoImport = async ({ region, table, csv, delimiter, keepAlive }) => {
   const fileName = path.resolve(csv);
 
-  const start = process.hrtime()[0];
-  const client = new AWS.DynamoDB({ region });
+  const [ startS, startNS ] = process.hrtime();
+  const start = startS + (startNS/1000000000);
+
+  // Using the keep-alive increases the throughput.
+  const agent = new https.Agent({
+    keepAlive,
+  });
+  const client = new AWS.DynamoDB({
+    region,
+    httpOptions: {
+      agent,
+    },
+  });
   let count = 0;
   const processor = batchOf(25, async (items) => {
     await batchWrite({ client, table, items });
     count += items.length;
-    if (count % 100 == 0) {
-      const seconds = (process.hrtime()[0] - start);
+    if (count % 2500 == 0) {
+      const seconds = since(start);
       const itemsPerSecond = count / seconds;
       console.log(
         `Inserted ${count} records in ${seconds}s - ${itemsPerSecond} records per second`
@@ -93,16 +111,18 @@ const dynamoImport = async ({ region, table, csv, delimiter }) => {
 
 const argv = yargs(process.argv)
   .usage(
-    "Usage: $0 --region=eu-west-2 --table=ddbimport --csv=../data.csv --delimiter=comma"
+    "Usage: $0 --region=eu-west-2 --table=ddbimport --csv=../data.csv --delimiter=comma --keep-alive=true"
   )
   .describe("region", "DynamoDB region.")
   .describe("table", "DynamoDB table.")
   .describe("csv", "Path to file to import.")
+  .describe("keepAlive", "Whether to keep connections alive (true/false - default true)")
   .describe("delimiter", "tab / comma")
   .demandOption(["region", "table", "csv"])
   .help("h")
   .alias("h", "help").argv;
 
 argv.delimiter = argv.delimiter === "tab" ? "\t" : ",";
+argv.keepAlive = argv.keepAlive === "false" ? false : true;
 
 dynamoImport(argv);

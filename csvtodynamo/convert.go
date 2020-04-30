@@ -25,13 +25,11 @@ func (c *Converter) init() error {
 
 // ReadBatch reads 25 items from the CSV.
 // Only strings, numbers and boolean values are supported in CSV.
-func (c *Converter) ReadBatch(items []map[string]*dynamodb.AttributeValue) (itms []map[string]*dynamodb.AttributeValue, read int, err error) {
+func (c *Converter) ReadBatch() (items []map[string]*dynamodb.AttributeValue, read int, err error) {
 	batchSize := 25
-	if items == nil {
-		items = make([]map[string]*dynamodb.AttributeValue, batchSize)
-	}
+	items = make([]map[string]*dynamodb.AttributeValue, batchSize)
 	for read = 0; read < batchSize; read++ {
-		items[read], err = c.Read(items[read])
+		items[read], err = c.Read()
 		if err != nil {
 			return items, read, err
 		}
@@ -40,14 +38,12 @@ func (c *Converter) ReadBatch(items []map[string]*dynamodb.AttributeValue) (itms
 }
 
 // Read a single item from the CSV.
-func (c *Converter) Read(items map[string]*dynamodb.AttributeValue) (itms map[string]*dynamodb.AttributeValue, err error) {
+func (c *Converter) Read() (items map[string]*dynamodb.AttributeValue, err error) {
 	record, err := c.r.Read()
 	if err != nil {
-		return items, err
+		return
 	}
-	if items == nil {
-		items = make(map[string]*dynamodb.AttributeValue, len(record))
-	}
+	items = make(map[string]*dynamodb.AttributeValue, len(record))
 	for i, column := range c.columnNames {
 		if len(record[i]) != 0 {
 			items[column] = dynamoValue(record[i])
