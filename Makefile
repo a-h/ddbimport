@@ -28,11 +28,11 @@ prepare-data:
 	rm googlebooks-eng-1M-1gram-20090715-0.csv
 
 01-nodeimport:
-	cd 01-nodeimport && ./index.js --region=eu-west-2 --table ddbimport --csv ../data.csv --delimiter=tab
+	cd 01-nodeimport && ./index.js --region=eu-west-2 --table ddbimport --csv ../data.csv --delimiter=tab --numericFields=year
 
 02-goimport:
-	go run 02-goimport/main.go -region=eu-west-2 -table=ddbimport -csv=data.csv -delimiter=tab
+	go run 02-goimport/main.go -region=eu-west-2 -table=ddbimport -csv=data.csv -delimiter=tab -numericFields=year
 
 03-goimport-gr:
-	go run 03-goimport-gr/main.go -region=eu-west-2 -table=ddbimport -csv=data.csv -delimiter=tab -concurrency=16
+	go run 03-goimport-gr/main.go -region=eu-west-2 -table=ddbimport -csv=data.csv -delimiter=tab -numericFields=year -concurrency=8
 

@@ -3,9 +3,11 @@ package main
 import (
 	"encoding/csv"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -19,6 +21,8 @@ import (
 var regionFlag = flag.String("region", "", "The AWS region where the DynamoDB table is located")
 var tableFlag = flag.String("table", "", "The DynamoDB table name to import to.")
 var csvFlag = flag.String("csv", "", "The CSV file to upload to DynamoDB.")
+var numericFieldsFlag = flag.String("numericFields", "", "A comma separated list of fields that are numeric.")
+var booleanFieldsFlag = flag.String("booleanFields", "", "A comma separated list of fields that are boolean.")
 var concurrencyFlag = flag.Int("concurrency", 4, "Number of imports to execute in parallel.")
 var delimiterFlag = flag.String("delimiter", "comma", "The delimiter of the CSV file. Use the string 'tab' or 'comma'")
 
@@ -53,7 +57,10 @@ func main() {
 
 	csvr := csv.NewReader(f)
 	csvr.Comma = delimiter(*delimiterFlag)
-	reader, err := csvtodynamo.NewConverter(csvr)
+	conf := csvtodynamo.NewConfiguration()
+	conf.AddNumberKeys(strings.Split(*numericFieldsFlag, ",")...)
+	conf.AddBoolKeys(strings.Split(*booleanFieldsFlag, ",")...)
+	reader, err := csvtodynamo.NewConverter(csvr, conf)
 	if err != nil {
 		log.Fatalf("failed to create CSV reader: %v", err)
 	}
@@ -141,5 +148,8 @@ func (bw BatchWriter) Write(records []map[string]*dynamodb.AttributeValue) (err 
 			bw.tableName: writeRequests,
 		},
 	})
+	if err != nil {
+		err = fmt.Errorf("batchwriter: %w", err)
+	}
 	return
 }
