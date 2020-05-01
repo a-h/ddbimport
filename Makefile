@@ -36,3 +36,5 @@ prepare-data:
 03-goimport-gr:
 	go run 03-goimport-gr/main.go -region=eu-west-2 -table=ddbimport -csv=data.csv -delimiter=tab -numericFields=year -concurrency=8
 
+04-ec2:
+	GOOS=linux go build ../03-go-import-gr/main.go -o ddbimport && scp -i ddbimport.key -r ddbimport ec2-user@ec2-35-178-249-154.eu-west-2.compute.amazonaws.com:/home/ec2-user 
