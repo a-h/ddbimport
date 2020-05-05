@@ -36,7 +36,14 @@ stepFunctions:
             Type: Task
             Resource:
               Fn::GetAtt: [preflight, Arn]
-            Next: process
+            Next: continue
+          continue:
+            Type: Choice
+            Choices:
+              - Variable: "$.prefl.cnt"
+                BooleanEquals: false
+                Next: process
+            Default: preflight
           process:
             Type: Map
             InputPath: "$"
