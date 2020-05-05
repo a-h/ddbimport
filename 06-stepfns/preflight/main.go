@@ -21,13 +21,10 @@ func Handler(ctx context.Context, req state.State) (resp state.State, err error)
 	if req.Source.Delimiter == "" {
 		req.Source.Delimiter = ","
 	}
-	if req.Configuration.StepFunctionConcurrency == 0 {
-		req.Configuration.StepFunctionConcurrency = 128
-	}
 	if req.Configuration.LambdaDurationSeconds < 30 {
-		req.Configuration.LambdaDurationSeconds = 30
+		req.Configuration.LambdaDurationSeconds = 300
 	}
-	log.Printf("Preflight check of S3 file (%s, %s, %s) with concurrency %d to DynamoDB table %s in region %s", req.Source.Region, req.Source.Bucket, req.Source.Key, req.Configuration.StepFunctionConcurrency, req.Target.TableName, req.Target.Region)
+	log.Printf("Preflight check of S3 file (%s, %s, %s) with Lambda concurrency %d to DynamoDB table %s in region %s", req.Source.Region, req.Source.Bucket, req.Source.Key, req.Configuration.LambdaConcurrency, req.Target.TableName, req.Target.Region)
 	log.Printf("Using numeric fields: %v", req.Source.NumericFields)
 	log.Printf("Using boolean fields: %v", req.Source.BooleanFields)
 	log.Printf("Using delimiter: '%v'", req.Source.Delimiter)
@@ -42,10 +39,10 @@ func Handler(ctx context.Context, req state.State) (resp state.State, err error)
 	resp = req
 	maxDuration := req.Configuration.LambdaDurationSeconds * time.Second
 
-	// Allocate records to workers in batches of 50,000 lines.
-	// 50,000 lines / 25 BatchWriteOperations = 2000 operations per allocation.
-	// At 3000 records per second, each batch is 16.6 seconds of work.
-	var workerBatch int64 = 50000
+	// Allocate records to workers in batches of 100,000 lines.
+	// 100,000 lines / 25 BatchWriteOperations = 4000 operations per allocation.
+	// At 3000 records per second, each batch is 30 seconds of work.
+	var workerBatch int64 = 100000
 
 	// Parse the CSV data, keeping track of the byte position in the file.
 	lines := resp.Preflight.Line

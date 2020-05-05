@@ -30,9 +30,9 @@ func Handler(ctx context.Context, req state.ImportInput) (resp Response, err err
 	start := time.Now()
 	var duration time.Duration
 
-	// Optionally be able to divide work up across workers.
+	// Default to 8 concurrent Lambdas.
 	if req.Configuration.LambdaConcurrency < 1 {
-		req.Configuration.LambdaConcurrency = 1
+		req.Configuration.LambdaConcurrency = 8
 	}
 	if req.Source.Delimiter == "" {
 		req.Source.Delimiter = ","

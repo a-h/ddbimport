@@ -48,7 +48,7 @@ stepFunctions:
             Type: Map
             InputPath: "$"
             ItemsPath: "$.batches"
-            MaxConcurrency: 100
+            MaxConcurrency: 50
             Parameters:
               "src.$": "$.src"
               "cnf.$": "$.cnf"

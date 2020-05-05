@@ -38,12 +38,10 @@ type Source struct {
 
 // Configuration of the Step Function.
 type Configuration struct {
-	// StepFunctionConcurrency is the number of Lambda functions that will be executed in parallel.
-	// The maximum value is 500 without exceeding the Lambda scaling limits of concurrency.
-	StepFunctionConcurrency int `json:"stepConcur"`
 	// LambdaConcurrency is the number of BatchWriteItem requests that will be executed in parallel.
 	LambdaConcurrency int `json:"lambdaConcur"`
 	// LambdaDurationSeconds is the minimum amount of time each Lambda will spend executing tasks.
+	// After exceeding this, the preflight will start again.
 	LambdaDurationSeconds time.Duration `json:"lambdaDurSecs"`
 }
 

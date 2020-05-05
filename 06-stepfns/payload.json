@@ -2,14 +2,13 @@
   "src": {
   	"region": "eu-west-2",
 	"bucket": "infinityworks-ddbimport",
-	"key": "data.csv",
+	"key": "data1M.csv",
 	"numFlds": ["year"],
 	"delim": "\t"
   },
   "cnf": {
-    "stepConcur": 10,
     "lambdaConcur": 8,
-    "lambdaDurSecs": 30
+    "lambdaDurSecs": 300
   },
   "tgt": {
   	"region": "eu-west-2",
