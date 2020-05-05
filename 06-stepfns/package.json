@@ -1,0 +1,9 @@
+{
+  "name": "ddbimport",
+  "description": "",
+  "version": "0.1.0",
+  "dependencies": {},
+  "devDependencies": {
+    "serverless-step-functions": "^2.18.0"
+  }
+}

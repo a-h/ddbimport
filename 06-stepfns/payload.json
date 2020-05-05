@@ -1,18 +1,18 @@
 {
-  "source": {
+  "src": {
   	"region": "eu-west-2",
 	"bucket": "infinityworks-ddbimport",
 	"key": "data.csv",
-	"numericFields": ["year"],
-	"delimiter": "\t"
+	"numFlds": ["year"],
+	"delim": "\t"
   },
-  "worker": {
-  	"index": 0,
-	"count": 64,
-	"concurrency": 8
+  "cnf": {
+    "stepConcur": 10,
+    "lambdaConcur": 8,
+    "lambdaDurSecs": 30
   },
-  "target": {
+  "tgt": {
   	"region": "eu-west-2",
-	"tableName": "ddbimport"
+	"table": "ddbimport"
   }
 }

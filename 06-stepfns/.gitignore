@@ -16,3 +16,5 @@ bin
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+node_modules
+package-lock.json

@@ -24,6 +24,40 @@ provider:
         - "s3:GetObject"
       Resource: "*"
 
+stepFunctions:
+  stateMachines:
+    ddbimport:
+      name: ddbimport
+      definition:
+        Comment: "Imports data into DynamoDB in parallel."
+        StartAt: preflight
+        States:
+          preflight:
+            Type: Task
+            Resource:
+              Fn::GetAtt: [preflight, Arn]
+            Next: process
+          process:
+            Type: Map
+            InputPath: "$"
+            ItemsPath: "$.batches"
+            Parameters:
+              "src.$": "$.src"
+              "cnf.$": "$.cnf"
+              "tgt.$": "$.tgt"
+              "range.$": "$$.Map.Item.Value"
+            Iterator:
+              StartAt: import
+              States:
+                import:
+                  Type: Task
+                  Resource:
+                    Fn::GetAtt: [ddbimport, Arn]
+                  End: true
+            End: true
+
+  validate: true # enable pre-deployment definition validation (disabled by default)
+
 package:
   exclude:
     - ./**
@@ -31,5 +65,10 @@ package:
     - ./bin/**
 
 functions:
+  preflight:
+    handler: bin/preflight
   ddbimport:
     handler: bin/ddbimport
+
+plugins:
+  - serverless-step-functions
