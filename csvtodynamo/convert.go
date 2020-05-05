@@ -25,6 +25,7 @@ func NewConfiguration() *Configuration {
 // Configuration for the Converter.
 type Configuration struct {
 	KeyToConverter map[string]keyConverter
+	Columns        []string
 }
 
 // AddStringKeys add string keys to the configuration.
@@ -49,6 +50,10 @@ func (conf *Configuration) AddBoolKeys(s ...string) {
 }
 
 func (c *Converter) init() error {
+	if len(c.conf.Columns) > 0 {
+		c.columnNames = c.conf.Columns
+		return nil
+	}
 	record, err := c.r.Read()
 	if err != nil {
 		return err

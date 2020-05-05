@@ -43,7 +43,7 @@ func Handler(ctx context.Context, req state.ImportInput) (resp Response, err err
 	log.Printf("Using delimiter: '%v'", req.Source.Delimiter)
 
 	// Get the file from S3.
-	src, err := get(req.Source.Region, req.Source.Bucket, req.Source.Key, req.Range[0], req.Range[1])
+	src, err := get(req.Source.Region, req.Source.Bucket, req.Source.Key, req.Range[0], req.Range[1]-1)
 	if err != nil {
 		resp.DurationMS = time.Now().Sub(start).Milliseconds()
 		return
@@ -53,6 +53,10 @@ func Handler(ctx context.Context, req state.ImportInput) (resp Response, err err
 	csvr := csv.NewReader(src)
 	csvr.Comma = rune(req.Source.Delimiter[0])
 	conf := csvtodynamo.NewConfiguration()
+	if req.Range[0] > 0 {
+		csvr.FieldsPerRecord = len(req.Columns)
+		conf.Columns = req.Columns
+	}
 	conf.AddNumberKeys(req.Source.NumericFields...)
 	conf.AddBoolKeys(req.Source.BooleanFields...)
 	reader, err := csvtodynamo.NewConverter(csvr, conf)
@@ -62,7 +66,8 @@ func Handler(ctx context.Context, req state.ImportInput) (resp Response, err err
 
 	bw, err := batchwriter.New(req.Target.Region, req.Target.TableName)
 	if err != nil {
-		log.Fatalf("failed to create batch writer: %v", err)
+		log.Printf("failed to create batch writer: %v", err)
+		return
 	}
 
 	var batchCount int64 = 1
@@ -72,6 +77,7 @@ func Handler(ctx context.Context, req state.ImportInput) (resp Response, err err
 	batches := make(chan []map[string]*dynamodb.AttributeValue, 128) // 128 * 400KB max size allows the use of 50MB of RAM.
 	var wg sync.WaitGroup
 	wg.Add(req.Configuration.LambdaConcurrency)
+	var errors []error
 	for i := 0; i < req.Configuration.LambdaConcurrency; i++ {
 		go func() {
 			defer wg.Done()
@@ -79,9 +85,11 @@ func Handler(ctx context.Context, req state.ImportInput) (resp Response, err err
 				err := bw.Write(batch)
 				if err != nil {
 					log.Printf("error executing batch put: %v", err)
+					errors = append(errors, err)
+					return
 				}
 				recordCount := atomic.AddInt64(&recordCount, int64(len(batch)))
-				if batchCount := atomic.AddInt64(&batchCount, 1); batchCount%100 == 0 {
+				if batchCount := atomic.AddInt64(&batchCount, 1); batchCount%500 == 0 {
 					duration = time.Since(start)
 					log.Printf("inserted %d batches (%d records) in %v - %d records per second", batchCount, recordCount, duration, int(float64(recordCount)/duration.Seconds()))
 				}
@@ -91,12 +99,14 @@ func Handler(ctx context.Context, req state.ImportInput) (resp Response, err err
 
 	// Push data into the job queue.
 	for {
-		batch, _, err := reader.ReadBatch()
+		batch, read, err := reader.ReadBatch()
 		if err != nil && err != io.EOF {
-			log.Fatalf("failed to read batch: %v", err)
+			log.Printf("failed to read batch: %v", err)
 			return resp, err
 		}
-		batches <- batch
+		if read > 0 {
+			batches <- batch[:read]
+		}
 		if err == io.EOF {
 			break
 		}
@@ -106,6 +116,11 @@ func Handler(ctx context.Context, req state.ImportInput) (resp Response, err err
 	// Wait for completion.
 	wg.Wait()
 	duration = time.Since(start)
+	if len(errors) > 0 {
+		log.Printf("errors: %v", errors)
+		err = errors[0]
+		return
+	}
 	log.Printf("inserted %d batchCount (%d records) in %v - %d records per second", batchCount, recordCount, duration, int(float64(recordCount)/duration.Seconds()))
 	log.Print("complete")
 
@@ -125,7 +140,7 @@ func get(region, bucket, key string, from, to int64) (io.ReadCloser, error) {
 	goo, err := svc.GetObject(&s3.GetObjectInput{
 		Bucket: &bucket,
 		Key:    &key,
-		Range:  aws.String(fmt.Sprintf("%d-%d", from, to)),
+		Range:  aws.String(fmt.Sprintf("bytes=%d-%d", from, to)),
 	})
 	return goo.Body, err
 }

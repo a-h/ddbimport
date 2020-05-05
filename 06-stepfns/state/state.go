@@ -22,7 +22,8 @@ type State struct {
 type ImportInput struct {
 	Input
 	// Range of bytes.
-	Range []int64 `json:"range"`
+	Range   []int64  `json:"range"`
+	Columns []string `json:"cols"`
 }
 
 // Source of the CSV data to import.

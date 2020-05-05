@@ -41,10 +41,12 @@ stepFunctions:
             Type: Map
             InputPath: "$"
             ItemsPath: "$.batches"
+            MaxConcurrency: 100
             Parameters:
               "src.$": "$.src"
               "cnf.$": "$.cnf"
               "tgt.$": "$.tgt"
+              "cols.$": "$.prefl.cols"
               "range.$": "$$.Map.Item.Value"
             Iterator:
               StartAt: import
@@ -52,7 +54,7 @@ stepFunctions:
                 import:
                   Type: Task
                   Resource:
-                    Fn::GetAtt: [ddbimport, Arn]
+                    Fn::GetAtt: [import, Arn]
                   End: true
             End: true
 
@@ -67,8 +69,8 @@ package:
 functions:
   preflight:
     handler: bin/preflight
-  ddbimport:
-    handler: bin/ddbimport
+  import:
+    handler: bin/import
 
 plugins:
   - serverless-step-functions
