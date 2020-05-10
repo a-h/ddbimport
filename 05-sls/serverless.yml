@@ -1,7 +1,4 @@
-service: ddbimport
-
-frameworkVersion: ">=1.28.0 <2.0.0"
-
+service: ddbimport-lambda
 provider:
   name: aws
   memorySize: 2048 # optional, in MB, default is 1024

@@ -2,13 +2,11 @@
   "source": {
   	"region": "eu-west-2",
 	"bucket": "infinityworks-ddbimport",
-	"key": "data.csv",
+	"key": "data500k.csv",
 	"numericFields": ["year"],
 	"delimiter": "\t"
   },
   "worker": {
-  	"index": 0,
-	"count": 64,
 	"concurrency": 8
   },
   "target": {

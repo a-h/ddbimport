@@ -88,7 +88,7 @@ func main() {
 				recordCount := atomic.AddInt64(&recordCount, int64(len(batch)))
 				if batchCount := atomic.AddInt64(&batchCount, 1); batchCount%100 == 0 {
 					duration = time.Since(start)
-					log.Printf("inserted %d batches (%d records) in %v - %d records per second", batchCount, recordCount, duration, int(float64(recordCount)/duration.Seconds()))
+					log.Printf("%d records per second", int(float64(recordCount)/duration.Seconds()))
 				}
 			}
 		}()

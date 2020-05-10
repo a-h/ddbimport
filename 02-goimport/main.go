@@ -20,7 +20,7 @@ var tableFlag = flag.String("table", "", "The DynamoDB table name to import to."
 var csvFlag = flag.String("csv", "", "The CSV file to upload to DynamoDB.")
 var numericFieldsFlag = flag.String("numericFields", "", "A comma separated list of fields that are numeric.")
 var booleanFieldsFlag = flag.String("booleanFields", "", "A comma separated list of fields that are boolean.")
-var delimiterFlag = flag.String("delimiter", "comma", "The delimiter of the CSV file. Use the string 'tab' or 'comma'")
+var delimiterFlag = flag.String("delimiter", "comma", "The delimiter of the CSV file - 'tab' or 'comma'")
 
 func main() {
 	flag.Parse()
@@ -72,14 +72,14 @@ func main() {
 		}
 		if batchCount%100 == 0 {
 			duration = time.Since(start)
-			log.Printf("inserted %d batches (%d records) in %v - %d records per second", batchCount, totalCount, duration, int(float64(totalCount)/duration.Seconds()))
+			log.Printf("%d records per second", int(float64(totalCount)/duration.Seconds()))
 		}
 		if end {
 			break
 		}
 	}
 	duration = time.Since(start)
-	log.Printf("inserted %d batches (%d records) in %v - %d records per second", batchCount, totalCount, duration, int(float64(totalCount)/duration.Seconds()))
+	log.Printf("%d records per second", int(float64(totalCount)/duration.Seconds()))
 	log.Print("complete")
 }
 

@@ -12,11 +12,16 @@ aws ec2 describe-key-pairs --key-names=ddbimport --output=text
 if [ $? -ne 0 ]
 then
     echo "Importing key pair..."
-    aws ec2 import-key-pair --key-name=ddbimport --public-key-material=file://ddbimport.key.pub
+    aws ec2 import-key-pair \
+        --key-name=ddbimport \
+        --public-key-material=file://ddbimport.key.pub
 fi
 
 echo "Finding default VPC..."
-VPCID=`aws ec2 describe-vpcs --filters Name=isDefault,Values=true --query 'Vpcs[*].VpcId' --output text`
+VPCID=`aws ec2 describe-vpcs \
+    --filters Name=isDefault,Values=true \
+    --query 'Vpcs[*].VpcId' \
+    --output text`
 if [ "$VPCID" == "" ]
 then
     echo "No default VPC found."
@@ -29,11 +34,18 @@ VPCSG=`aws ec2 describe-security-groups --group-names ddbimport --query 'Securit
 if [ "$VPCSG" == "" ]
 then
     echo "Creating security group..."
-    VPCSG=`aws ec2 create-security-group --group-name ddbimport --description "ddbimport" --vpc-id $VPCID --output=text`
+    VPCSG=`aws ec2 create-security-group \
+        --group-name ddbimport \
+        --description "ddbimport" \
+        --vpc-id $VPCID \
+        --output=text`
 fi
 echo "Using security group" $VPCSG
 echo "Adding SSH access to security group..."
-aws ec2 authorize-security-group-ingress --group-id $VPCSG --ip-permissions '[{"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": "SSH access from anywhere."}]}]' --output=text
+aws ec2 authorize-security-group-ingress \
+    --group-id $VPCSG \
+    --ip-permissions '[{"IpProtocol": "tcp", "FromPort": 22, "ToPort": 22, "IpRanges": [{"CidrIp": "0.0.0.0/0", "Description": "SSH access from anywhere."}]}]' \
+    --output=text
 
 echo "Creating role..."
 aws iam create-role --role-name ddbimport --assume-role-policy-document=file://ddbimport_role.json

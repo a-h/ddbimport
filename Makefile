@@ -28,7 +28,7 @@ prepare-data:
 	rm googlebooks-eng-1M-1gram-20090715-0.csv
 
 01-nodeimport:
-	cd 01-nodeimport && ./index.js --region=eu-west-2 --table ddbimport --csv ../data.csv --delimiter=tab --numericFields=year
+	cd 01-nodeimport && ./index.js --region=eu-west-2 --table ddbimport --csv ../data.csv --delimiter=tab --numericFields=year --keepAlive=false
 
 02-goimport:
 	go run 02-goimport/main.go -region=eu-west-2 -table=ddbimport -csv=data.csv -delimiter=tab -numericFields=year

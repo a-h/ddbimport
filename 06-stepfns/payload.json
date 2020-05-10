@@ -2,7 +2,7 @@
   "src": {
   	"region": "eu-west-2",
 	"bucket": "infinityworks-ddbimport",
-	"key": "data1M.csv",
+	"key": "data4M.csv",
 	"numFlds": ["year"],
 	"delim": "\t"
   },
