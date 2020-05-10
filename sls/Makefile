@@ -7,9 +7,5 @@ build:
 clean:
 	rm -rf ./bin
 
-import-data:
-	aws s3 cp ../data.csv s3://infinityworks-ddbimport/data.csv
-	aws s3 cp ../data.csv s3://infinityworks-ddbimport/data100k.csv
-
 deploy: clean build
 	sls deploy --verbose

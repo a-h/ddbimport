@@ -8,8 +8,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/a-h/ddbimport/06-stepfns/linereader"
-	"github.com/a-h/ddbimport/06-stepfns/state"
+	"github.com/a-h/ddbimport/sls/linereader"
+	"github.com/a-h/ddbimport/sls/state"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"

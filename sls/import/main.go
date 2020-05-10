@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/csv"
+	"fmt"
 	"io"
 	"log"
 	"sync"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/a-h/ddbimport/batchwriter"
 	"github.com/a-h/ddbimport/csvtodynamo"
+	"github.com/a-h/ddbimport/sls/state"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -18,73 +20,32 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 )
 
-// Request to the ddbimport Lambda.
-type Request struct {
-	Source Source `json:"source"`
-	Worker Worker `json:"worker"`
-	Target Target `json:"target"`
-}
-
-// Source of the CSV data to import.
-type Source struct {
-	Region        string   `json:"region"`
-	Bucket        string   `json:"bucket"`
-	Key           string   `json:"key"`
-	NumericFields []string `json:"numericFields"`
-	BooleanFields []string `json:"booleanFields"`
-	Delimiter     string   `json:"delimiter"`
-}
-
-// Target DynamoDB table.
-type Target struct {
-	Region    string `json:"region"`
-	TableName string `json:"tableName"`
-}
-
-// Worker details.
-type Worker struct {
-	// Index of the worker in the set, e.g. 0, 1, 2, 3 out of a 4 worker set.
-	Index int `json:"index"`
-	// Count of total workers, e.g. 4.
-	Count int `json:"count"`
-	// Concurrency of each worker. Defaults to 1.
-	Concurrency int `json:"concurrency"`
-}
-
 // Response from the Lambda.
 type Response struct {
-	Worker         Worker `json:"worker"`
-	Error          error  `json:"error"`
-	ProcessedCount int64  `json:"processedCount"`
-	DurationMS     int64  `json:"durationMs"`
+	ProcessedCount int64 `json:"processedCount"`
+	DurationMS     int64 `json:"durationMs"`
 }
 
-func Handler(ctx context.Context, req Request) (resp Response, err error) {
-	resp.Worker = req.Worker
+func Handler(ctx context.Context, req state.ImportInput) (resp Response, err error) {
 	start := time.Now()
 	var duration time.Duration
 
-	// Optionally be able to divide work up across workers.
-	if req.Worker.Count == 0 {
-		req.Worker.Count = 1
-		req.Worker.Index = 0
-	}
-	if req.Worker.Concurrency < 1 {
-		req.Worker.Concurrency = 1
+	// Default to 8 concurrent Lambdas.
+	if req.Configuration.LambdaConcurrency < 1 {
+		req.Configuration.LambdaConcurrency = 8
 	}
 	if req.Source.Delimiter == "" {
 		req.Source.Delimiter = ","
 	}
-	log.Printf("Worker index %d out of %d processing S3 file (%s, %s, %s) with concurrency %d to DynamoDB table %s in region %s", req.Worker.Index, req.Worker.Count, req.Source.Region, req.Source.Bucket, req.Source.Key, req.Worker.Concurrency, req.Target.TableName, req.Target.Region)
+	log.Printf("Processing bytes %v of S3 file (%s, %s, %s) with concurrency %d to DynamoDB table %s in region %s", req.Range, req.Source.Region, req.Source.Bucket, req.Source.Key, req.Configuration.LambdaConcurrency, req.Target.TableName, req.Target.Region)
 	log.Printf("Using numeric fields: %v", req.Source.NumericFields)
 	log.Printf("Using boolean fields: %v", req.Source.BooleanFields)
 	log.Printf("Using delimiter: '%v'", req.Source.Delimiter)
 
 	// Get the file from S3.
-	src, err := get(req.Source.Region, req.Source.Bucket, req.Source.Key)
+	src, err := get(req.Source.Region, req.Source.Bucket, req.Source.Key, req.Range[0], req.Range[1]-1)
 	if err != nil {
 		resp.DurationMS = time.Now().Sub(start).Milliseconds()
-		resp.Error = err
 		return
 	}
 
@@ -92,6 +53,10 @@ func Handler(ctx context.Context, req Request) (resp Response, err error) {
 	csvr := csv.NewReader(src)
 	csvr.Comma = rune(req.Source.Delimiter[0])
 	conf := csvtodynamo.NewConfiguration()
+	if req.Range[0] > 0 {
+		csvr.FieldsPerRecord = len(req.Columns)
+		conf.Columns = req.Columns
+	}
 	conf.AddNumberKeys(req.Source.NumericFields...)
 	conf.AddBoolKeys(req.Source.BooleanFields...)
 	reader, err := csvtodynamo.NewConverter(csvr, conf)
@@ -101,7 +66,8 @@ func Handler(ctx context.Context, req Request) (resp Response, err error) {
 
 	bw, err := batchwriter.New(req.Target.Region, req.Target.TableName)
 	if err != nil {
-		log.Fatalf("failed to create batch writer: %v", err)
+		log.Printf("failed to create batch writer: %v", err)
+		return
 	}
 
 	var batchCount int64 = 1
@@ -110,17 +76,20 @@ func Handler(ctx context.Context, req Request) (resp Response, err error) {
 	// Start up workers.
 	batches := make(chan []map[string]*dynamodb.AttributeValue, 128) // 128 * 400KB max size allows the use of 50MB of RAM.
 	var wg sync.WaitGroup
-	wg.Add(req.Worker.Concurrency)
-	for i := 0; i < req.Worker.Concurrency; i++ {
+	wg.Add(req.Configuration.LambdaConcurrency)
+	var errors []error
+	for i := 0; i < req.Configuration.LambdaConcurrency; i++ {
 		go func() {
 			defer wg.Done()
 			for batch := range batches {
 				err := bw.Write(batch)
 				if err != nil {
 					log.Printf("error executing batch put: %v", err)
+					errors = append(errors, err)
+					return
 				}
 				recordCount := atomic.AddInt64(&recordCount, int64(len(batch)))
-				if batchCount := atomic.AddInt64(&batchCount, 1); batchCount%100 == 0 {
+				if batchCount := atomic.AddInt64(&batchCount, 1); batchCount%500 == 0 {
 					duration = time.Since(start)
 					log.Printf("inserted %d batches (%d records) in %v - %d records per second", batchCount, recordCount, duration, int(float64(recordCount)/duration.Seconds()))
 				}
@@ -129,17 +98,14 @@ func Handler(ctx context.Context, req Request) (resp Response, err error) {
 	}
 
 	// Push data into the job queue.
-	batchIndex := 0
 	for {
-		batch, _, err := reader.ReadBatch()
+		batch, read, err := reader.ReadBatch()
 		if err != nil && err != io.EOF {
-			log.Fatalf("failed to read batch %d: %v", batchIndex, err)
+			log.Printf("failed to read batch: %v", err)
+			return resp, err
 		}
-		batchIndex++
-		// Only process the batch if it's designated for this worker.
-		assignedWorkerIndex := batchIndex % req.Worker.Count
-		if assignedWorkerIndex == req.Worker.Index {
-			batches <- batch
+		if read > 0 {
+			batches <- batch[:read]
 		}
 		if err == io.EOF {
 			break
@@ -150,6 +116,11 @@ func Handler(ctx context.Context, req Request) (resp Response, err error) {
 	// Wait for completion.
 	wg.Wait()
 	duration = time.Since(start)
+	if len(errors) > 0 {
+		log.Printf("errors: %v", errors)
+		err = errors[0]
+		return
+	}
 	log.Printf("inserted %d batchCount (%d records) in %v - %d records per second", batchCount, recordCount, duration, int(float64(recordCount)/duration.Seconds()))
 	log.Print("complete")
 
@@ -158,7 +129,7 @@ func Handler(ctx context.Context, req Request) (resp Response, err error) {
 	return
 }
 
-func get(region, bucket, key string) (io.ReadCloser, error) {
+func get(region, bucket, key string, from, to int64) (io.ReadCloser, error) {
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String(region),
 	})
@@ -169,6 +140,7 @@ func get(region, bucket, key string) (io.ReadCloser, error) {
 	goo, err := svc.GetObject(&s3.GetObjectInput{
 		Bucket: &bucket,
 		Key:    &key,
+		Range:  aws.String(fmt.Sprintf("bytes=%d-%d", from, to)),
 	})
 	return goo.Body, err
 }
