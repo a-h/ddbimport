@@ -5,19 +5,20 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
-	"log"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/a-h/ddbimport/batchwriter"
 	"github.com/a-h/ddbimport/csvtodynamo"
+	"github.com/a-h/ddbimport/log"
 	"github.com/a-h/ddbimport/sls/state"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"go.uber.org/zap"
 )
 
 // Response from the Lambda.
@@ -27,6 +28,18 @@ type Response struct {
 }
 
 func Handler(ctx context.Context, req state.ImportInput) (resp Response, err error) {
+	logger := log.Default.With(zap.String("sourceRegion", req.Source.Region),
+		zap.String("sourceBucket", req.Source.Bucket),
+		zap.String("sourceKey", req.Source.Key),
+		zap.String("tableRegion", req.Target.Region),
+		zap.String("tableName", req.Target.TableName),
+		zap.Int64("sourceFromRange", req.Range[0]),
+		zap.Int64("sourceToRange", req.Range[1]))
+	logger.Info("starting", zap.Strings("numericFields", req.Source.NumericFields),
+		zap.Strings("booleanFields", req.Source.BooleanFields),
+		zap.Strings("cols", req.Columns),
+		zap.String("delimiter", req.Source.Delimiter))
+
 	start := time.Now()
 	var duration time.Duration
 
@@ -37,10 +50,6 @@ func Handler(ctx context.Context, req state.ImportInput) (resp Response, err err
 	if req.Source.Delimiter == "" {
 		req.Source.Delimiter = ","
 	}
-	log.Printf("Processing bytes %v of S3 file (%s, %s, %s) with concurrency %d to DynamoDB table %s in region %s", req.Range, req.Source.Region, req.Source.Bucket, req.Source.Key, req.Configuration.LambdaConcurrency, req.Target.TableName, req.Target.Region)
-	log.Printf("Using numeric fields: %v", req.Source.NumericFields)
-	log.Printf("Using boolean fields: %v", req.Source.BooleanFields)
-	log.Printf("Using delimiter: '%v'", req.Source.Delimiter)
 
 	// Get the file from S3.
 	src, err := get(req.Source.Region, req.Source.Bucket, req.Source.Key, req.Range[0], req.Range[1]-1)
@@ -61,16 +70,15 @@ func Handler(ctx context.Context, req state.ImportInput) (resp Response, err err
 	conf.AddBoolKeys(req.Source.BooleanFields...)
 	reader, err := csvtodynamo.NewConverter(csvr, conf)
 	if err != nil {
-		log.Fatalf("failed to create CSV reader: %v", err)
+		logger.Error("failed to create CSV reader", zap.Error(err))
+		return
 	}
-
 	bw, err := batchwriter.New(req.Target.Region, req.Target.TableName)
 	if err != nil {
-		log.Printf("failed to create batch writer: %v", err)
+		logger.Error("failed to create batch writer", zap.Error(err))
 		return
 	}
 
-	var batchCount int64 = 1
 	var recordCount int64
 
 	// Start up workers.
@@ -84,14 +92,15 @@ func Handler(ctx context.Context, req state.ImportInput) (resp Response, err err
 			for batch := range batches {
 				err := bw.Write(batch)
 				if err != nil {
-					log.Printf("error executing batch put: %v", err)
+					logger.Error("error executing batch put", zap.Error(err))
 					errors = append(errors, err)
 					return
 				}
-				recordCount := atomic.AddInt64(&recordCount, int64(len(batch)))
-				if batchCount := atomic.AddInt64(&batchCount, 1); batchCount%500 == 0 {
+				if recordCount := atomic.AddInt64(&recordCount, int64(len(batch))); recordCount%10000 == 0 {
 					duration = time.Since(start)
-					log.Printf("inserted %d batches (%d records) in %v - %d records per second", batchCount, recordCount, duration, int(float64(recordCount)/duration.Seconds()))
+					logger.Info("progress update",
+						zap.Int64("records", recordCount),
+						zap.Int("rps", int(float64(recordCount)/duration.Seconds())))
 				}
 			}
 		}()
@@ -101,7 +110,7 @@ func Handler(ctx context.Context, req state.ImportInput) (resp Response, err err
 	for {
 		batch, read, err := reader.ReadBatch()
 		if err != nil && err != io.EOF {
-			log.Printf("failed to read batch: %v", err)
+			logger.Error("failed to read batch", zap.Error(err))
 			return resp, err
 		}
 		if read > 0 {
@@ -117,12 +126,11 @@ func Handler(ctx context.Context, req state.ImportInput) (resp Response, err err
 	wg.Wait()
 	duration = time.Since(start)
 	if len(errors) > 0 {
-		log.Printf("errors: %v", errors)
+		logger.Error("batch execution failed", zap.Errors("errors", errors))
 		err = errors[0]
 		return
 	}
-	log.Printf("inserted %d batchCount (%d records) in %v - %d records per second", batchCount, recordCount, duration, int(float64(recordCount)/duration.Seconds()))
-	log.Print("complete")
+	logger.Info("complete")
 
 	resp.ProcessedCount = recordCount
 	resp.DurationMS = time.Now().Sub(start).Milliseconds()

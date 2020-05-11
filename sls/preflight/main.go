@@ -5,18 +5,28 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
-	"log"
 	"time"
 
+	"github.com/a-h/ddbimport/log"
 	"github.com/a-h/ddbimport/sls/linereader"
 	"github.com/a-h/ddbimport/sls/state"
 	"github.com/aws/aws-lambda-go/lambda"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
+	"go.uber.org/zap"
 )
 
 func Handler(ctx context.Context, req state.State) (resp state.State, err error) {
+	logger := log.Default.With(zap.String("sourceRegion", req.Source.Region),
+		zap.String("sourceBucket", req.Source.Bucket),
+		zap.String("sourceKey", req.Source.Key),
+		zap.String("tableRegion", req.Target.Region),
+		zap.String("tableName", req.Target.TableName))
+	logger.Info("starting", zap.Strings("numericFields", req.Source.NumericFields),
+		zap.Strings("booleanFields", req.Source.BooleanFields),
+		zap.String("delimiter", req.Source.Delimiter))
+
 	start := time.Now()
 	if req.Source.Delimiter == "" {
 		req.Source.Delimiter = ","
@@ -24,10 +34,6 @@ func Handler(ctx context.Context, req state.State) (resp state.State, err error)
 	if req.Configuration.LambdaDurationSeconds < 30 {
 		req.Configuration.LambdaDurationSeconds = 300
 	}
-	log.Printf("Preflight check of S3 file (%s, %s, %s) with Lambda concurrency %d to DynamoDB table %s in region %s", req.Source.Region, req.Source.Bucket, req.Source.Key, req.Configuration.LambdaConcurrency, req.Target.TableName, req.Target.Region)
-	log.Printf("Using numeric fields: %v", req.Source.NumericFields)
-	log.Printf("Using boolean fields: %v", req.Source.BooleanFields)
-	log.Printf("Using delimiter: '%v'", req.Source.Delimiter)
 
 	// Get the file from S3.
 	src, err := get(req.Source.Region, req.Source.Bucket, req.Source.Key, req.Preflight.Offset)
@@ -81,19 +87,19 @@ func Handler(ctx context.Context, req state.State) (resp state.State, err error)
 		}
 		recordCount++
 		if recordCount%50000 == 0 {
-			log.Printf("Processed %d records", recordCount)
+			logger.Info("progress update", zap.Int64("records", recordCount))
 		}
 	}
-	log.Printf("Processed %d lines in %v", lines, time.Since(start))
+	logger = logger.With(zap.Int64("records", recordCount))
 	if resp.Preflight.Offset != lr.Offset {
 		resp.Batches = append(resp.Batches, []int64{batchStartIndex, lr.Offset})
 		resp.Preflight.Offset = lr.Offset
 	}
 	if timedOut {
-		log.Printf("Timed out, starting from current position in new Lambda...")
+		logger.Info("continuing", zap.Int64("nextStartOffset", resp.Preflight.Offset))
 		return
 	}
-	log.Print("Complete. Exiting...")
+	logger.Info("complete")
 	return
 }
 
