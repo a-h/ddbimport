@@ -88,9 +88,9 @@ func main() {
 			Region:        *bucketRegionFlag,
 			Bucket:        *bucketNameFlag,
 			Key:           *bucketKeyFlag,
-			NumericFields: strings.Split(*numericFieldsFlag, ","),
-			BooleanFields: strings.Split(*booleanFieldsFlag, ","),
-			Delimiter:     *delimiterFlag,
+			NumericFields: numericFields,
+			BooleanFields: booleanFields,
+			Delimiter:     string(delimiter(*delimiterFlag)),
 		},
 		Configuration: state.Configuration{
 			LambdaConcurrency:     *concurrencyFlag,
@@ -108,6 +108,7 @@ func importRemote(stepFnRegion string, input state.Input) {
 	logger := log.Default.With(zap.String("sourceRegion", input.Source.Region),
 		zap.String("sourceBucket", input.Source.Bucket),
 		zap.String("sourceKey", input.Source.Key),
+		zap.String("delimiter", input.Source.Delimiter),
 		zap.String("tableRegion", input.Target.Region),
 		zap.String("tableName", input.Target.TableName))
 

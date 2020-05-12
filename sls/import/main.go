@@ -82,6 +82,7 @@ func Handler(ctx context.Context, req state.ImportInput) (resp Response, err err
 	var recordCount int64
 
 	// Start up workers.
+	ctx, cancel := context.WithCancel(context.Background())
 	batches := make(chan []map[string]*dynamodb.AttributeValue, 128) // 128 * 400KB max size allows the use of 50MB of RAM.
 	var wg sync.WaitGroup
 	wg.Add(req.Configuration.LambdaConcurrency)
@@ -94,6 +95,7 @@ func Handler(ctx context.Context, req state.ImportInput) (resp Response, err err
 				if err != nil {
 					logger.Error("error executing batch put", zap.Error(err))
 					errors = append(errors, err)
+					cancel()
 					return
 				}
 				if recordCount := atomic.AddInt64(&recordCount, int64(len(batch))); recordCount%10000 == 0 {
@@ -102,19 +104,32 @@ func Handler(ctx context.Context, req state.ImportInput) (resp Response, err err
 						zap.Int64("records", recordCount),
 						zap.Int("rps", int(float64(recordCount)/duration.Seconds())))
 				}
+				select {
+				case <-ctx.Done():
+					return
+				default:
+				}
 			}
 		}()
 	}
 
 	// Push data into the job queue.
+fillJobQueue:
 	for {
 		batch, read, err := reader.ReadBatch()
 		if err != nil && err != io.EOF {
-			logger.Error("failed to read batch", zap.Error(err))
+			logger.Error("failed to read batch, closing down", zap.Error(err))
+			cancel()
+			wg.Wait()
 			return resp, err
 		}
 		if read > 0 {
-			batches <- batch[:read]
+			select {
+			case batches <- batch[:read]:
+				break
+			case <-ctx.Done():
+				break fillJobQueue
+			}
 		}
 		if err == io.EOF {
 			break
@@ -124,6 +139,7 @@ func Handler(ctx context.Context, req state.ImportInput) (resp Response, err err
 
 	// Wait for completion.
 	wg.Wait()
+	cancel()
 	duration = time.Since(start)
 	if len(errors) > 0 {
 		logger.Error("batch execution failed", zap.Errors("errors", errors))
