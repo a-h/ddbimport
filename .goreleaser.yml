@@ -13,6 +13,10 @@ builds:
   binary: ddbimport
   ldflags:
    - -s -w -X github.com/a-h/ddbimport/version.Version={{.Version}} -X github.com/a-h/ddbimport/version.Commit={{.Commit}}
+  goos:
+      - linux
+      - windows
+      - darwin
 
 # Sign with GPG.
 signs:
