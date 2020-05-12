@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -19,6 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/sfn"
 	"github.com/google/uuid"
 	"go.uber.org/zap"
@@ -38,6 +40,7 @@ var inputFileFlag = flag.String("inputFile", "", "The local CSV file to upload t
 
 // Remote configuration.
 var stepFnRegionFlag = flag.String("stepFnRegion", "", "The AWS region where the step function has been installed. If left blank, the DynamoDB region is used.")
+var remoteFlag = flag.Bool("remote", false, "Set when the import should be carried out using the ddbimport Step Function.")
 
 // Global configuration.
 var numericFieldsFlag = flag.String("numericFields", "", "A comma separated list of fields that are numeric.")
@@ -55,53 +58,81 @@ func delimiter(s string) rune {
 	return ','
 }
 
+func printUsageAndExit(suffix ...string) {
+	fmt.Println("usage: ddbimport [<args>]")
+	fmt.Println()
+	fmt.Println("To install the Step Function: ddbimport install")
+	fmt.Println()
+	flag.Usage()
+	for _, s := range suffix {
+		fmt.Println(s)
+	}
+	os.Exit(1)
+}
+
 func main() {
 	flag.Parse()
+	if len(os.Args) >= 2 {
+		if os.Args[1] == "install" {
+			install()
+			return
+		}
+	}
 	if *tableRegionFlag == "" || *tableNameFlag == "" {
-		flag.Usage()
-		os.Exit(1)
+		printUsageAndExit("Must include a table region and table name flag.")
 	}
 	numericFields := strings.Split(*numericFieldsFlag, ",")
 	booleanFields := strings.Split(*booleanFieldsFlag, ",")
-	if *inputFileFlag != "" {
-		if *bucketRegionFlag != "" || *bucketNameFlag != "" || *bucketKeyFlag != "" {
-			fmt.Println("Must not pass the bucketRegion, bucketName and bucketKey arguments if inputFile is set.")
-			flag.Usage()
-			os.Exit(1)
-		}
-		// Import local.
-		importLocal(*inputFileFlag, numericFields, booleanFields, delimiter(*delimiterFlag), *tableRegionFlag, *tableNameFlag, *concurrencyFlag)
+	localFile := *inputFileFlag != ""
+	remoteFile := *bucketRegionFlag != "" || *bucketNameFlag != "" || *bucketKeyFlag != ""
+	if localFile && remoteFile {
+		printUsageAndExit("Must pass inputFile OR bucketRegion, bucketName and bucketKey.")
 	}
-	if *bucketRegionFlag == "" || *bucketNameFlag == "" || *bucketKeyFlag == "" {
-		fmt.Println("Must pass the bucketRegion, bucketName and bucketKey arguments if inputFile is omitted.")
-		flag.Usage()
-		os.Exit(1)
+	if remoteFile && (*bucketRegionFlag == "" || *bucketNameFlag == "" || *bucketKeyFlag == "") {
+		printUsageAndExit("Must pass values for all of the bucketRegion, bucketName and bucketKey arguments if a localFile argument is omitted.")
+	}
+	if *remoteFlag {
+		if !remoteFile {
+			printUsageAndExit("Remote import requires the file to be located within an S3 bucket. Pass the bucketRegion, bucketName and bucketKey arguments.")
+		}
+		stepFnRegion := *tableRegionFlag
+		if *stepFnRegionFlag != "" {
+			stepFnRegion = *stepFnRegionFlag
+		}
+		input := state.Input{
+			Source: state.Source{
+				Region:        *bucketRegionFlag,
+				Bucket:        *bucketNameFlag,
+				Key:           *bucketKeyFlag,
+				NumericFields: numericFields,
+				BooleanFields: booleanFields,
+				Delimiter:     string(delimiter(*delimiterFlag)),
+			},
+			Configuration: state.Configuration{
+				LambdaConcurrency:     *concurrencyFlag,
+				LambdaDurationSeconds: 900,
+			},
+			Target: state.Target{
+				Region:    *tableRegionFlag,
+				TableName: *tableNameFlag,
+			},
+		}
+		importRemote(stepFnRegion, input)
+		return
 	}
 
-	// Import remote.
-	stepFnRegion := *tableRegionFlag
-	if *stepFnRegionFlag != "" {
-		stepFnRegion = *stepFnRegionFlag
+	// Import local.
+	inputName := *inputFileFlag
+	input := func() (io.ReadCloser, error) { return os.Open(*inputFileFlag) }
+	if remoteFile {
+		inputName = fmt.Sprintf("s3://%s/%s (%s)", url.PathEscape(*bucketNameFlag), url.PathEscape(*bucketKeyFlag), *bucketRegionFlag)
+		input = func() (io.ReadCloser, error) { return s3Get(*bucketRegionFlag, *bucketNameFlag, *bucketKeyFlag) }
 	}
-	input := state.Input{
-		Source: state.Source{
-			Region:        *bucketRegionFlag,
-			Bucket:        *bucketNameFlag,
-			Key:           *bucketKeyFlag,
-			NumericFields: numericFields,
-			BooleanFields: booleanFields,
-			Delimiter:     string(delimiter(*delimiterFlag)),
-		},
-		Configuration: state.Configuration{
-			LambdaConcurrency:     *concurrencyFlag,
-			LambdaDurationSeconds: 900,
-		},
-		Target: state.Target{
-			Region:    *tableRegionFlag,
-			TableName: *tableNameFlag,
-		},
-	}
-	importRemote(stepFnRegion, input)
+	importLocal(input, inputName, numericFields, booleanFields, delimiter(*delimiterFlag), *tableRegionFlag, *tableNameFlag, *concurrencyFlag)
+}
+
+func install() {
+	fmt.Println("install feature hasn't been built yet")
 }
 
 func importRemote(stepFnRegion string, input state.Input) {
@@ -200,8 +231,23 @@ type sfnResponse struct {
 	DurationMS     int64 `json:"durationMs"`
 }
 
-func importLocal(inputFile string, numericFields, booleanFields []string, delimiter rune, tableRegion, tableName string, concurrency int) {
-	logger := log.Default.With(zap.String("inputFile", inputFile),
+func s3Get(region, bucket, key string) (io.ReadCloser, error) {
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String(region),
+	})
+	if err != nil {
+		return nil, err
+	}
+	svc := s3.New(sess)
+	goo, err := svc.GetObject(&s3.GetObjectInput{
+		Bucket: &bucket,
+		Key:    &key,
+	})
+	return goo.Body, err
+}
+
+func importLocal(input func() (io.ReadCloser, error), inputName string, numericFields, booleanFields []string, delimiter rune, tableRegion, tableName string, concurrency int) {
+	logger := log.Default.With(zap.String("input", inputName),
 		zap.String("tableRegion", tableRegion),
 		zap.String("tableName", tableName))
 
@@ -211,7 +257,7 @@ func importLocal(inputFile string, numericFields, booleanFields []string, delimi
 	var duration time.Duration
 
 	// Create dependencies.
-	f, err := os.Open(inputFile)
+	f, err := input()
 	if err != nil {
 		logger.Fatal("failed to open input file", zap.Error(err))
 	}
