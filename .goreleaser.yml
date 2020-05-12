@@ -28,8 +28,6 @@ signs:
 
 archives:
 - format: binary
-  files:
-    - sls/package.zip
 
 checksum:
   name_template: 'checksums.txt'
@@ -41,3 +39,8 @@ changelog:
     exclude:
     - '^docs:'
     - '^test:'
+
+release:
+  extra_files:
+    - glob: ./sls/package.zip
+
