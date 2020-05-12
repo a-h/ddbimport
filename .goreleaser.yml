@@ -2,7 +2,7 @@ project_name: ddbimport
 
 before:
   hooks:
-    - make package
+    - cd sls && make package
 
 builds:
 -
