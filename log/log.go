@@ -1,6 +1,7 @@
 package log
 
 import (
+	"github.com/a-h/ddbimport/version"
 	"go.uber.org/zap"
 )
 
@@ -12,5 +13,5 @@ func init() {
 	if err != nil {
 		panic("failed to initilize logger: " + err.Error())
 	}
-	Default = logger
+	Default = logger.With(zap.String("v", version.Version))
 }
