@@ -28,6 +28,8 @@ signs:
 
 archives:
 - format: binary
+  files:
+    - sls/package.zip
 
 checksum:
   name_template: 'checksums.txt'
