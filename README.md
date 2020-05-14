@@ -60,3 +60,32 @@ Inserts per second of the Google ngram 1 dataset (English).
 
 <img src="benchmarks.png"/>
 
+To reproduce my results.
+
+### Create a DynamoDB table
+
+```
+aws dynamodb create-table \
+  --table-name ddbimport \
+  --attribute-definitions AttributeName=ngram,AttributeType=S AttributeName=year,AttributeType=N \
+  --key-schema AttributeName=ngram,KeyType=HASH AttributeName=year,KeyType=RANGE \
+  --billing-mode PAY_PER_REQUEST 
+```
+
+### Download Google data
+
+```
+curl http://storage.googleapis.com/books/ngrams/books/googlebooks-eng-1M-1gram-20090715-0.csv.zip -o 0.csv.zip
+```
+
+### Prepare the data
+
+```
+# Add the headers.
+echo "ngram	year	match_count	page_count	volume_count" > data.csv
+# Prepare the data.
+unzip 0.csv.zip
+cat googlebooks-eng-1M-1gram-20090715-0.csv >> data.csv
+rm googlebooks-eng-1M-1gram-20090715-0.csv
+```
+
