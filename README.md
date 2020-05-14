@@ -12,6 +12,8 @@ Import CSV data into DynamoDB.
 * Parallel imports using AWS Step Functions to import > 4M rows per minute
 * No depdendencies (no need for .NET, Python, Node.js, Docker, AWS CLI etc.)
 
+<img src="import.gif"/>
+
 ## Warning
 
 This program will use up all available DynamoDB capacity. It is not designed for use against production tables. Use at your own risk.
