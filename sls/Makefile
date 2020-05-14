@@ -12,4 +12,5 @@ deploy: clean build
 
 package: clean build
 	sls package
-	zip package ./.serverless/cloudformation-template-* ./.serverless/ddbimport.zip
+	go get github.com/rakyll/statik
+	statik -src=./.serverless

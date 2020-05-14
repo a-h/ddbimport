@@ -6,6 +6,8 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
+	"net/http"
 	"net/url"
 	"os"
 	"strings"
@@ -17,12 +19,16 @@ import (
 	"github.com/a-h/ddbimport/csvtodynamo"
 	"github.com/a-h/ddbimport/log"
 	"github.com/a-h/ddbimport/sls/state"
+	_ "github.com/a-h/ddbimport/sls/statik"
+	"github.com/a-h/ddbimport/version"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/cloudformation"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
 	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/aws/aws-sdk-go/service/sfn"
 	"github.com/google/uuid"
+	"github.com/rakyll/statik/fs"
 	"go.uber.org/zap"
 )
 
@@ -39,7 +45,8 @@ var bucketKeyFlag = flag.String("bucketKey", "", "The file within the S3 bucket 
 var inputFileFlag = flag.String("inputFile", "", "The local CSV file to upload to DynamoDB. You must pass the csv flag OR the key and bucket flags.")
 
 // Remote configuration.
-var stepFnRegionFlag = flag.String("stepFnRegion", "", "The AWS region where the step function has been installed. If left blank, the DynamoDB region is used.")
+var stepFnRegionFlag = flag.String("stepFnRegion", "", "The AWS region of the ddbimport Step Function.")
+var installFlag = flag.Bool("install", false, "Set to install the ddbimport Step Function.")
 var remoteFlag = flag.Bool("remote", false, "Set when the import should be carried out using the ddbimport Step Function.")
 
 // Global configuration.
@@ -60,8 +67,19 @@ func delimiter(s string) rune {
 
 func printUsageAndExit(suffix ...string) {
 	fmt.Println("usage: ddbimport [<args>]")
+	fmt.Println("version:", version.Version)
 	fmt.Println()
-	fmt.Println("To install the Step Function: ddbimport install")
+	fmt.Println("Import local CSV from this computer:")
+	fmt.Println("  ddbimport -inputFile ../data.csv -delimiter tab -numericFields year -tableRegion eu-west-2 -tableName ddbimport")
+	fmt.Println()
+	fmt.Println("Import S3 file from this computer:")
+	fmt.Println("  ddbimport -bucketRegion eu-west-2 -bucketName infinityworks-ddbimport -bucketKey data1M.csv -delimiter tab -numericFields year -tableRegion eu-west-2 -tableName ddbimport")
+	fmt.Println()
+	fmt.Println("Import S3 file using remote ddbimport Step Function:")
+	fmt.Println("  ddbimport -remote -bucketRegion eu-west-2 -bucketName infinityworks-ddbimport -bucketKey data1M.csv -delimiter tab -numericFields year -tableRegion eu-west-2 -tableName ddbimport")
+	fmt.Println()
+	fmt.Println("Install ddbimport Step Function:")
+	fmt.Println("  ddbimport -install -stepFnRegion=eu-west-2")
 	fmt.Println()
 	flag.Usage()
 	for _, s := range suffix {
@@ -72,11 +90,12 @@ func printUsageAndExit(suffix ...string) {
 
 func main() {
 	flag.Parse()
-	if len(os.Args) >= 2 {
-		if os.Args[1] == "install" {
-			install()
-			return
+	if *installFlag {
+		if *stepFnRegionFlag == "" {
+			printUsageAndExit("Must pass stepFnRegion")
 		}
+		install(*stepFnRegionFlag)
+		return
 	}
 	if *tableRegionFlag == "" || *tableNameFlag == "" {
 		printUsageAndExit("Must include a table region and table name flag.")
@@ -131,8 +150,170 @@ func main() {
 	importLocal(input, inputName, numericFields, booleanFields, delimiter(*delimiterFlag), *tableRegionFlag, *tableNameFlag, *concurrencyFlag)
 }
 
-func install() {
-	fmt.Println("install feature hasn't been built yet")
+func setLambdaFunctionS3Location(template map[string]interface{}, zipLocation string) {
+	changeKey(template, zipLocation, "Resources", "PreflightLambdaFunction", "Properties", "Code", "S3Key")
+	changeKey(template, zipLocation, "Resources", "ImportLambdaFunction", "Properties", "Code", "S3Key")
+	return
+}
+
+// changeKey within JSON document.
+func changeKey(node map[string]interface{}, newValue string, path ...string) {
+	if len(path) == 0 {
+		return
+	}
+	key := path[0]
+	if value, ok := node[key]; ok {
+		if len(path) == 1 {
+			node[key] = newValue
+			return
+		}
+		if child, ok := value.(map[string]interface{}); ok {
+			changeKey(child, newValue, path[1:]...)
+		}
+	}
+}
+
+// getServerlessPackageFile e.g. /ddbimport.zip
+func getServerlessPackageFile(path string) (file http.File, err error) {
+	statikFS, err := fs.New()
+	if err != nil {
+		return
+	}
+	return statikFS.Open(path)
+}
+
+func getStackID(c *cloudformation.CloudFormation, name string) (stackID *string, err error) {
+	err = c.ListStacksPages(&cloudformation.ListStacksInput{}, func(lso *cloudformation.ListStacksOutput, lastPage bool) bool {
+		for _, s := range lso.StackSummaries {
+			if *s.StackName == name {
+				stackID = s.StackId
+				return false
+			}
+		}
+		return true
+	})
+	return
+}
+
+func s3Put(region, bucket, key string, data io.ReadSeeker) error {
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String(region),
+	})
+	if err != nil {
+		return err
+	}
+	svc := s3.New(sess)
+	_, err = svc.PutObject(&s3.PutObjectInput{
+		Bucket: &bucket,
+		Key:    &key,
+		Body:   data,
+	})
+	return err
+}
+
+func install(region string) {
+	log.Default.Info("installing ddbimport Step Function")
+	sess, err := session.NewSession(&aws.Config{Region: aws.String(region)})
+	if err != nil {
+		log.Default.Fatal("failed to create AWS session", zap.Error(err))
+	}
+	c := cloudformation.New(sess)
+
+	// Check to see if the stack already exists.
+	stackID, err := getStackID(c, "ddbimport")
+	if err != nil {
+		log.Default.Fatal("failed to list stacks", zap.Error(err))
+	}
+	if stackID == nil {
+		// Deploy it if it doesn't exist.
+		log.Default.Info("creating ddbimport stack")
+		f, err := getServerlessPackageFile("/cloudformation-template-create-stack.json")
+		if err != nil {
+			log.Default.Fatal("failed to get creation CloudFormation template", zap.Error(err))
+			return
+		}
+		defer f.Close()
+		createStackTemplate, err := ioutil.ReadAll(f)
+		if err != nil {
+			log.Default.Fatal("failed to read create CloudFormation template", zap.Error(err))
+		}
+		cso, err := c.CreateStack(&cloudformation.CreateStackInput{
+			Capabilities: aws.StringSlice([]string{cloudformation.CapabilityCapabilityIam, cloudformation.CapabilityCapabilityNamedIam}),
+			StackName:    aws.String("ddbimport"),
+			TemplateBody: aws.String(string(createStackTemplate)),
+		})
+		if err != nil {
+			log.Default.Fatal("failed to create stack", zap.Error(err))
+		}
+		stackID = cso.StackId
+		log.Default.Info("created stack", zap.String("stackId", *cso.StackId))
+		return
+	}
+
+	// Deploy the zip to S3.
+	// Find the ServerlessDeploymentBucket.
+	log.Default.Info("uploading Lambda zip")
+	var s3Bucket string
+	dso, err := c.DescribeStacks(&cloudformation.DescribeStacksInput{
+		StackName: stackID,
+	})
+	if err != nil {
+		log.Default.Fatal("failed to describe the stack", zap.Error(err))
+	}
+	if len(dso.Stacks) == 0 {
+		log.Default.Fatal("failed to find the stack")
+	}
+	for _, o := range dso.Stacks[0].Outputs {
+		if *o.OutputKey == "ServerlessDeploymentBucketName" {
+			s3Bucket = *o.OutputValue
+			break
+		}
+	}
+	if s3Bucket == "" {
+		log.Default.Fatal("could not find S3 bucket")
+	}
+	// Upload the zip.
+	lambdaZip, err := getServerlessPackageFile("/ddbimport.zip")
+	if err != nil {
+		log.Default.Fatal("failed to get the Lambda zip")
+	}
+	s3Path := version.Version + "/ddbimport.zip"
+	err = s3Put(region, s3Bucket, s3Path, lambdaZip)
+	if err != nil {
+		log.Default.Fatal("failed to upload the Lambda zip", zap.Error(err))
+	}
+	log.Default.Info("zip upload complete")
+
+	// Update the CloudFormation stack to set the Lambda location.
+	log.Default.Info("updating ddbimport stack")
+	// Get the update file.
+	f, err := getServerlessPackageFile("/cloudformation-template-update-stack.json")
+	if err != nil {
+		log.Default.Fatal("failed to get update CloudFormation template", zap.Error(err))
+	}
+	defer f.Close()
+	// Decode it and update the S3 location based on the current version.
+	d := json.NewDecoder(f)
+	var updateStackTemplate map[string]interface{}
+	err = d.Decode(&updateStackTemplate)
+	if err != nil {
+		log.Default.Fatal("failed to decode update CloudFormation template", zap.Error(err))
+	}
+	setLambdaFunctionS3Location(updateStackTemplate, s3Path)
+	updateStackTemplateJSON, err := json.Marshal(updateStackTemplate)
+	if err != nil {
+		log.Default.Fatal("failed to encode updated update CloudFormation template", zap.Error(err))
+	}
+	// Execute the update.
+	_, err = c.UpdateStack(&cloudformation.UpdateStackInput{
+		Capabilities: aws.StringSlice([]string{cloudformation.CapabilityCapabilityIam, cloudformation.CapabilityCapabilityNamedIam}),
+		StackName:    stackID,
+		TemplateBody: aws.String(string(updateStackTemplateJSON)),
+	})
+	if err != nil {
+		log.Default.Fatal("failed to update stack", zap.Error(err))
+	}
+	log.Default.Info("ddbimport step function succesfully deployed")
 }
 
 func importRemote(stepFnRegion string, input state.Input) {
