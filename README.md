@@ -28,6 +28,18 @@ A Docker image is available:
 docker pull adrianhesketh/ddbimport
 ```
 
+## Building from source
+
+Ensure you have `$GOPATH/bin` in `$PATH` (by default that is `~/go/bin`). This is needed for statik to build the serverless package.
+Install a supported version (v12 seems to work fine) of nodejs and npm or yarn.
+
+1. `git clone git@github.com:a-h/ddbimport; cd ddbimport`
+2. `yarn global add serverless` or `npm -g install serverless`, whichever you prefer
+3. `sls plugin install -n serverless-step-functions`
+4. `make -C sls package`
+5. `go build -o ddbimport cmd/main.go`
+
+
 ## Usage
 
 ### Import local CSV from local computer:
