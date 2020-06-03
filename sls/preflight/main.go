@@ -36,7 +36,7 @@ func Handler(ctx context.Context, req state.State) (resp state.State, err error)
 	}
 
 	// Get the file from S3.
-	src, err := get(req.Source.Region, req.Source.Bucket, req.Source.Key, req.Preflight.Offset)
+	src, srcSize, err := get(req.Source.Region, req.Source.Bucket, req.Source.Key, req.Preflight.Offset)
 	if err != nil {
 		return
 	}
@@ -62,6 +62,10 @@ func Handler(ctx context.Context, req state.State) (resp state.State, err error)
 			batchStartIndex = offset
 		}
 	})
+  // after linereader is done processing, batchStartIndex is the offset where the last batch ended (and the next one would've started)
+  // and we can use the file size as end offset
+  resp.Batches = append(resp.Batches, []int64{batchStartIndex, srcSize})
+
 	csvr := csv.NewReader(lr)
 	csvr.Comma = rune(resp.Source.Delimiter[0])
 	var timedOut bool
@@ -103,12 +107,12 @@ func Handler(ctx context.Context, req state.State) (resp state.State, err error)
 	return
 }
 
-func get(region, bucket, key string, startIndex int64) (io.ReadCloser, error) {
+func get(region, bucket, key string, startIndex int64) (io.ReadCloser, int64, error) {
 	sess, err := session.NewSession(&aws.Config{
 		Region: aws.String(region),
 	})
 	if err != nil {
-		return nil, err
+		return nil, -1, err
 	}
 	svc := s3.New(sess)
 	goo, err := svc.GetObject(&s3.GetObjectInput{
@@ -116,7 +120,7 @@ func get(region, bucket, key string, startIndex int64) (io.ReadCloser, error) {
 		Key:    &key,
 		Range:  aws.String(fmt.Sprintf("%d-", startIndex)),
 	})
-	return goo.Body, err
+	return goo.Body, *goo.ContentLength, err
 }
 
 func main() {
