@@ -34,10 +34,13 @@ Ensure you have `$GOPATH/bin` in `$PATH` (by default that is `~/go/bin`). This i
 Install a supported version (v12 seems to work fine) of nodejs and npm or yarn.
 
 1. `git clone git@github.com:a-h/ddbimport; cd ddbimport`
-2. `yarn global add serverless` or `npm -g install serverless`, whichever you prefer
-3. `sls plugin install -n serverless-step-functions`
-4. `make -C sls package`
-5. `go build -o ddbimport cmd/main.go`
+2. Edit `version/version.go` and set the Version const to something non-empty. Without this, the installing in steps 7-8 will fail.
+3. `yarn global add serverless` or `npm -g install serverless`, whichever you prefer
+4. `sls plugin install -n serverless-step-functions`
+5. `make -C sls package`
+6. `go build -o ddbimport cmd/main.go`. This is your main binary.
+7. Run `./ddbimport -install -stepFnRegion your-region` and wait a minute or so. You may check the CloudFormation console, a stack named `ddbimport` should now be created.
+8. Run the same command again. This will now upload the binary that contains two lambda function handlers, and setup the actual step function. If this fails, complaining about S3 key not found, you probably skipped step 2.
 
 
 ## Usage
