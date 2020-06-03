@@ -72,10 +72,10 @@ func (c *Converter) ReadBatch() (items []map[string]*dynamodb.AttributeValue, re
 	for read = 0; read < batchSize; read++ {
 		items[read], err = c.Read()
 		if err != nil {
-			return items, read, err
+      break
 		}
 	}
-	return items, read, err
+  return items[:read], read, err
 }
 
 // Read a single item from the CSV.
