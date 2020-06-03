@@ -62,9 +62,9 @@ func Handler(ctx context.Context, req state.State) (resp state.State, err error)
 			batchStartIndex = offset
 		}
 	})
-  // after linereader is done processing, batchStartIndex is the offset where the last batch ended (and the next one would've started)
-  // and we can use the file size as end offset
-  resp.Batches = append(resp.Batches, []int64{batchStartIndex, srcSize})
+	// after linereader is done processing, batchStartIndex is the offset where the last batch ended (and the next one would've started)
+	// and we can use the file size as end offset
+	resp.Batches = append(resp.Batches, []int64{batchStartIndex, srcSize})
 
 	csvr := csv.NewReader(lr)
 	csvr.Comma = rune(resp.Source.Delimiter[0])
