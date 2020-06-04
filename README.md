@@ -28,6 +28,21 @@ A Docker image is available:
 docker pull adrianhesketh/ddbimport
 ```
 
+## Building from source
+
+Ensure you have `$GOPATH/bin` in `$PATH` (by default that is `~/go/bin`). This is needed for statik (https://github.com/rakyll/statik) to package the Serverless application into the ddbimport binary.
+
+Install a supported version (v12 seems to work fine) of Node.js and NPM (https://www.npmjs.com/get-npm) or Yarn (https://classic.yarnpkg.com/en/docs/install/#mac-stable).
+
+1. `git clone git@github.com:a-h/ddbimport; cd ddbimport`
+2. Edit `version/version.go` and set the Version const to a non-empty value. Without this, installation in steps 7-8 will fail.
+3. `yarn global add serverless` or `npm -g install serverless`, whichever you prefer.
+4. `sls plugin install -n serverless-step-functions`
+5. `make -C sls package`
+6. `go build -o ddbimport cmd/main.go`. This is your main binary.
+7. Run `./ddbimport -install -stepFnRegion your-region` and wait a minute or so. You may check the CloudFormation console, a stack named `ddbimport` should now be created.
+8. Run the same command again. This will now upload the binary that contains two Lambda function handlers, and setup the actual step function. If this fails, complaining about S3 key not found, you probably skipped step 2.
+
 ## Usage
 
 ### Import local CSV from local computer:
