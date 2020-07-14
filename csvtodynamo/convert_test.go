@@ -16,6 +16,7 @@ func TestConverter(t *testing.T) {
 	var tests = []struct {
 		name          string
 		input         string
+		config        *Configuration
 		expected      []map[string]*dynamodb.AttributeValue
 		expectedError error
 	}{
@@ -28,25 +29,42 @@ func TestConverter(t *testing.T) {
 			expectedError: csv.ErrFieldCount,
 		},
 		{
-			name: "numbers are identified",
+			name: "numbers are not identified by default",
 			input: strings.Join([]string{
 				"a,b,c",
 				"1,2.12,-3",
 			}, "\n"),
 			expected: []map[string]*dynamodb.AttributeValue{
 				{
-					"a": &dynamodb.AttributeValue{N: aws.String("1")},
-					"b": &dynamodb.AttributeValue{N: aws.String("2.12")},
-					"c": &dynamodb.AttributeValue{N: aws.String("-3")},
+					"a": &dynamodb.AttributeValue{S: aws.String("1")},
+					"b": &dynamodb.AttributeValue{S: aws.String("2.12")},
+					"c": &dynamodb.AttributeValue{S: aws.String("-3")},
 				},
 			},
 		},
 		{
-			name: "bools are identified",
+			name: "numbers can be configured",
+			input: strings.Join([]string{
+				"a,b,c,d",
+				"1,2.12,2.12,-3",
+			}, "\n"),
+			config: NewConfiguration().AddNumberKeys("a", "c", "d"),
+			expected: []map[string]*dynamodb.AttributeValue{
+				{
+					"a": &dynamodb.AttributeValue{N: aws.String("1")},
+					"b": &dynamodb.AttributeValue{S: aws.String("2.12")},
+					"c": &dynamodb.AttributeValue{N: aws.String("2.12")},
+					"d": &dynamodb.AttributeValue{N: aws.String("-3")},
+				},
+			},
+		},
+		{
+			name: "bools can be identified",
 			input: strings.Join([]string{
 				"a,b,c,d",
 				"TRUE,FALSE,true,false",
 			}, "\n"),
+			config: NewConfiguration().AddBoolKeys("a", "b", "c", "d"),
 			expected: []map[string]*dynamodb.AttributeValue{
 				{
 					"a": &dynamodb.AttributeValue{BOOL: aws.Bool(true)},
@@ -76,6 +94,7 @@ func TestConverter(t *testing.T) {
 				"a,b,c",
 				`1.1.1,false,123`,
 			}, "\n"),
+			config: NewConfiguration().AddBoolKeys("b").AddNumberKeys("c"),
 			expected: []map[string]*dynamodb.AttributeValue{
 				{
 					"a": &dynamodb.AttributeValue{S: aws.String("1.1.1")},
@@ -101,16 +120,15 @@ func TestConverter(t *testing.T) {
 	for _, tt := range tests {
 		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
-			r := strings.NewReader(tt.input)
-			c, err := NewConverter(r)
+			r := csv.NewReader(strings.NewReader(tt.input))
+			c, err := NewConverter(r, tt.config)
 			if err != nil {
 				if diff := cmp.Diff(tt.expectedError, err); diff != "" {
 					t.Error("unexpected error")
 					t.Fatal(diff)
 				}
 			}
-			// Read a batch without re-using the slice.
-			actual, read, err := c.ReadBatch(nil)
+			actual, read, err := c.ReadBatch()
 			if err != io.EOF && tt.expectedError == nil {
 				t.Fatalf("unexpected error: %v", err)
 				return

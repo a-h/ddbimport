@@ -10,7 +10,11 @@ clean:
 deploy: clean build
 	sls deploy --verbose
 
-package: clean build
-	sls package
+statik:
+	mkdir -p ./.serverless
 	go get github.com/rakyll/statik
 	statik -src=./.serverless
+
+package: clean build
+	sls package
+	$(MAKE) statik
