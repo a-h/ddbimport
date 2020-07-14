@@ -4,6 +4,6 @@
   "version": "0.1.0",
   "dependencies": {},
   "devDependencies": {
-    "serverless-step-functions": "^2.18.0"
+    "serverless-step-functions": "^2.21.1"
   }
 }

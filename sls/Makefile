@@ -15,6 +15,9 @@ statik:
 	go get github.com/rakyll/statik
 	statik -src=./.serverless
 
+install-plugins:
+	sls plugin install -n serverless-step-functions
+
 package: clean build
 	sls package
 	$(MAKE) statik
