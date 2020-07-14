@@ -29,24 +29,27 @@ type Configuration struct {
 }
 
 // AddStringKeys add string keys to the configuration.
-func (conf *Configuration) AddStringKeys(s ...string) {
+func (conf *Configuration) AddStringKeys(s ...string) *Configuration {
 	for _, k := range s {
 		conf.KeyToConverter[k] = stringValue
 	}
+	return conf
 }
 
 // AddNumberKeys adds numeric keys to the configuration.
-func (conf *Configuration) AddNumberKeys(s ...string) {
+func (conf *Configuration) AddNumberKeys(s ...string) *Configuration {
 	for _, k := range s {
 		conf.KeyToConverter[k] = numberValue
 	}
+	return conf
 }
 
 // AddBoolKeys adds boolean keys to the configuration.
-func (conf *Configuration) AddBoolKeys(s ...string) {
+func (conf *Configuration) AddBoolKeys(s ...string) *Configuration {
 	for _, k := range s {
 		conf.KeyToConverter[k] = boolValue
 	}
+	return conf
 }
 
 func (c *Converter) init() error {
@@ -72,10 +75,10 @@ func (c *Converter) ReadBatch() (items []map[string]*dynamodb.AttributeValue, re
 	for read = 0; read < batchSize; read++ {
 		items[read], err = c.Read()
 		if err != nil {
-			return items, read, err
+			break
 		}
 	}
-	return items, read, err
+	return items[:read], read, err
 }
 
 // Read a single item from the CSV.
@@ -95,6 +98,9 @@ func (c *Converter) Read() (items map[string]*dynamodb.AttributeValue, err error
 
 // NewConverter creates a new CSV to DynamoDB converter.
 func NewConverter(r *csv.Reader, conf *Configuration) (*Converter, error) {
+	if conf == nil {
+		conf = NewConfiguration()
+	}
 	c := &Converter{
 		r:    r,
 		conf: conf,
