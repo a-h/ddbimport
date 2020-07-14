@@ -1,4 +1,4 @@
-.PHONY: build clean deploy
+.PHONY: build clean deploy statik package
 
 build:
 	env GOOS=linux go build -ldflags="-s -w -X github.com/a-h/ddbimport/log.v=`git rev-list --count HEAD`" -o bin/import import/main.go
@@ -21,3 +21,4 @@ install-plugins:
 package: clean build
 	sls package
 	$(MAKE) statik
+	zip -vr package.zip ./.serverless -x "*.DS_Store"
