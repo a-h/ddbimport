@@ -93,8 +93,8 @@ rm googlebooks-eng-1M-1gram-20090715-0.csv
 
 Learn about the project here:
 
-https://www.youtube.com/watch?v=UOuJWFBggEY
-https://infinityworks.com/insights/importing-data-into-dynamodb/
+* https://www.youtube.com/watch?v=UOuJWFBggEY
+* https://infinityworks.com/insights/importing-data-into-dynamodb/
 
 ## Building from source
 
