@@ -3,17 +3,14 @@ package process
 import (
 	"encoding/csv"
 	"io"
-	"time"
 
 	"github.com/a-h/ddbimport/sls/linereader"
 	"github.com/a-h/ddbimport/sls/state"
 	"go.uber.org/zap"
 )
 
-func Process(logger *zap.Logger, now func() time.Time, src io.ReadCloser, srcSize int64, batchSize int64, req state.State) (resp state.State, err error) {
-	start := now()
+func Process(logger *zap.Logger, hasTimedOut func() bool, src io.ReadCloser, srcSize int64, batchSize int64, req state.State) (resp state.State, err error) {
 	resp = req
-	maxDuration := req.Configuration.LambdaDurationSeconds * time.Second
 
 	// Parse the CSV data, keeping track of the byte position in the file.
 	lines := resp.Preflight.Line
@@ -30,7 +27,6 @@ func Process(logger *zap.Logger, now func() time.Time, src io.ReadCloser, srcSiz
 
 	csvr := csv.NewReader(lr)
 	csvr.Comma = rune(resp.Source.Delimiter[0])
-	var timedOut bool
 	var recordCount int64
 	for {
 		var record []string
@@ -38,32 +34,29 @@ func Process(logger *zap.Logger, now func() time.Time, src io.ReadCloser, srcSiz
 		if err != nil && err != io.EOF {
 			return
 		}
-		resp.Preflight.Continue = err == nil
-		if resp.Preflight.Columns == nil {
-			resp.Preflight.Columns = record
-		}
-		if now().Sub(start) > maxDuration {
-			timedOut = true
-			break
-		}
-		if err == io.EOF {
-			err = nil
-			break
-		}
 		recordCount++
 		if recordCount%50000 == 0 {
 			logger.Info("progress update", zap.Int64("records", recordCount))
 		}
+		if resp.Preflight.Columns == nil {
+			resp.Preflight.Columns = record
+		}
+		if err == io.EOF {
+			// Add trailing records.
+			if batchStartIndex != lr.Offset {
+				resp.Batches = append(resp.Batches, []int64{batchStartIndex, lr.Offset})
+			}
+			// Stop reading, start processing.
+			resp.Preflight.Continue = false
+			err = nil
+			logger.Info("complete", zap.Int64("records", recordCount))
+			return
+		}
+		if hasTimedOut() {
+			resp.Preflight.Offset = batchStartIndex // Carry on from the start of the current batch.
+			resp.Preflight.Continue = true          // There is more to process, we didn't reach EOF.
+			logger.Info("continuing", zap.Int64("nextStartOffset", resp.Preflight.Offset))
+			return
+		}
 	}
-	logger = logger.With(zap.Int64("records", recordCount))
-	if batchStartIndex != lr.Offset {
-		resp.Batches = append(resp.Batches, []int64{batchStartIndex, lr.Offset})
-	}
-	resp.Preflight.Offset = lr.Offset
-	if timedOut {
-		logger.Info("continuing", zap.Int64("nextStartOffset", resp.Preflight.Offset))
-		return
-	}
-	logger.Info("complete")
-	return
 }

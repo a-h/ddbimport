@@ -44,7 +44,12 @@ func Handler(ctx context.Context, req state.State) (resp state.State, err error)
 	// 100,000 lines / 25 BatchWriteOperations = 4000 operations per allocation.
 	// At 3000 records per second, each batch is 30 seconds of work.
 	var workerBatch int64 = 100000
-	return process.Process(logger, time.Now, src, srcSize, workerBatch, req)
+
+	start := time.Now()
+	hasTimedOut := func() bool {
+		return time.Since(start) > req.Configuration.LambdaDurationSeconds*time.Second
+	}
+	return process.Process(logger, hasTimedOut, src, srcSize, workerBatch, req)
 }
 
 func get(region, bucket, key string, startIndex int64) (io.ReadCloser, int64, error) {
