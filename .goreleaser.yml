@@ -22,10 +22,6 @@ builds:
 signs:
   - artifacts: checksum
 
-dockers:
-  - image_templates:
-    - adrianhesketh/ddbimport
-
 archives:
 - format: binary
 
