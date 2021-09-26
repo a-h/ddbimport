@@ -492,7 +492,9 @@ func importLocal(input func() (io.ReadCloser, error), inputName string, numericF
 				zap.Int64("batchCount", batchCount),
 				zap.Error(err))
 		}
-		batches <- batch
+		if len(batch) > 0 {
+			batches <- batch
+		}
 		if err == io.EOF {
 			break
 		}
